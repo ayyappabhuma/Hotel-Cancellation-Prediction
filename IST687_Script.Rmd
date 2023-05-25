@@ -1,0 +1,437 @@
+---
+title: "Hotel Cancellations"
+author : "Ayyappa Bhuma, Sreelakshmy, khushboo"
+---
+
+## Hotel Booking Cancellations
+The main objective of the project is to understand the main drivers for cancellation and reservations of hotel bookings
+
+## Loading Required Packages
+The first step is to install the packages and load them into the environment.
+
+```{r}
+#Data Exploration
+library(dplyr)
+library(ggplot2)
+library(ggmap)
+
+#Data Modelling
+library(caret)
+library(kernlab)
+library(arules)
+library(arulesViz)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+```
+
+## Data Initialisation
+Loading the dataset provided and understanding the structure of it is the next step in our analysis
+
+```{r}
+data_url <- "https://intro-datascience.s3.us-east-2.amazonaws.com/Resort01.csv"
+hotel_data <- read.csv(data_url)
+```
+
+```{r}
+#analysing the dataset
+summary(hotel_data)
+glimpse(hotel_data)
+```
+
+## Data Exploration
+Variable-wise analysis of the data
+
+### IsCanceled
+Categorical Value indicating if the booking was canceled (1)	or not (0)
+
+```{r}
+unique(hotel_data$IsCanceled)
+class(hotel_data$IsCanceled)
+#Though the variable is factor, it is labeled as integer. So, it is to be converted into a factor
+hotel_data$IsCanceled <- as.factor(hotel_data$IsCanceled)
+sum(is.na(hotel_data$IsCanceled)) #checking for missing values
+table(hotel_data$IsCanceled) #count of each unique type
+#The distribution of values is not skewed and is good enough for our analysis
+IsCanceled_plot <- ggplot(hotel_data, aes(IsCanceled)) + geom_bar(fill = '#005E9A8E')
+IsCanceled_plot
+
+```
+
+### LeadTime
+Number of days between booking date and arrival date
+
+```{r}
+sum(is.na(hotel_data$LeadTime)) #checking for missing values
+LeadTime_plot <- ggplot(hotel_data, aes(x = LeadTime, y = IsCanceled)) + geom_boxplot(fill='#00FF4D4D', alpha=0.3)
+LeadTime_plot
+
+```
+### StaysInWeekendNights 
+Number	of	weekend	nights	(Saturday	or	Sunday)	the	guest	stayed	or	booked	to	stay	at	the	hotel
+
+```{r}
+sum(is.na(hotel_data$StaysInWeekendNights)) #checking for missing values
+unique(hotel_data$StaysInWeekendNights)
+StaysInWeekendNights_plot <- ggplot(hotel_data, aes(x = StaysInWeekendNights, y = IsCanceled)) + geom_boxplot(fill = '#005E9A8E')
+StaysInWeekendNights_plot
+```
+
+### StaysInWeekNights 
+Number	of	week	nights	the	guest	stayed	or	booked	to	stay	at	the	hotel
+
+```{r}
+sum(is.na(hotel_data$StaysInWeekNights)) #checking for missing values
+unique(hotel_data$StaysInWeekNights)
+StaysInWeekNights_plot <- ggplot(hotel_data, aes(x = StaysInWeekNights, y = IsCanceled)) + geom_boxplot(fill = '#005E9A8E')
+StaysInWeekNights_plot
+```
+
+### Adults
+An integer variable giving the number of adults in the booking
+
+```{r}
+sum(is.na(hotel_data$Adults))
+table(hotel_data$Adults)
+
+Adults_plot <- ggplot(hotel_data, aes(Adults, fill = IsCanceled)) + geom_histogram(binwidth = 1) + xlim(0, 5)
+Adults_plot
+
+```
+We can see from the initial distribution of the plot that Adults variable has no direct impact on the target variable
+
+### Children
+An integer variable giving the number of children in the booking
+
+```{r}
+sum(is.na(hotel_data$Children))
+table(hotel_data$Children)
+
+Children_plot <- ggplot(hotel_data, aes(Children, fill = IsCanceled)) + geom_histogram(binwidth = 1) +xlim(0,5) + ylim(0, 2000)
+Children_plot
+
+```
+
+### Babies
+An integer variable giving the number of babies in the booking
+
+```{r}
+sum(is.na(hotel_data$Babies))
+table(hotel_data$Babies)
+
+Babies_plot <- ggplot(hotel_data, aes(Babies, fill = IsCanceled)) + geom_histogram(binwidth = 1)
+Babies_plot
+
+```
+
+### Meal
+It is a categorical variable indicating the type of meal booked by the customer.
+
+```{r}
+sum(is.na(hotel_data$Meal)) #Checking for missing values
+# Meal is a categorical variable, so, it is to be converted into factor type
+hotel_data$Meal <- as.factor(hotel_data$Meal)
+table(hotel_data$Meal)
+
+#levels(hotel_data$Meal)[levels(hotel_data$Meal)%in%c("SC      ", "Undefined")] <- "SC        "
+#levels(hotel_data$Meal)
+
+Meals_plot <- ggplot(hotel_data, aes(Meal, fill = IsCanceled)) + geom_bar()
+Meals_plot
+```
+Though there are 2 categories as SC and Undefined, both represent no meal package. So, we can simply replace the Undefined values with SC
+```{r}
+hotel_data$Meal <- as.character(hotel_data$Meal)
+hotel_data$Meal[hotel_data$Meal == 'Undefined'] <- 'SC'
+hotel_data$Meal[hotel_data$Meal == 'SC'] <- 'SC'
+hotel_data$Meal <- as.factor(hotel_data$Meal)
+table(hotel_data$Meal)
+unique(hotel_data$Meal)
+Meals_plot <- ggplot(hotel_data, aes(Meal, fill = IsCanceled)) + geom_bar()
+Meals_plot
+```
+
+### Country
+
+```{r}
+hotel_data$Country <- as.factor(hotel_data$Country)
+#making subset of just the canceled observations
+hotel_canceled <- subset(hotel_data, hotel_data$IsCanceled == 1)
+
+country_data <- merge(data.frame(table(hotel_data$Country)), data.frame(table(hotel_canceled$Country)), by="Var1", all = T)
+colnames(country_data) <- c("Country", "TotalCount", "CanceledCount")
+country_data[is.na(country_data)] <- 0
+country_data$percentage <- (country_data$CanceledCount / country_data$TotalCount) * 100
+country_data_sub <- subset(country_data, country_data$TotalCount >= 5)
+library(rworldmap)
+
+shotel<-joinCountryData2Map(country_data_sub, joinCode = "NAME" 
+, nameJoinColumn = "Country"
+, nameCountryColumn = "Country"
+, suggestForFailedCodes = FALSE 
+, mapResolution="coarse" 
+, projection=NA #DEPRECATED
+, verbose = FALSE   
+)
+mapCountryData(shotel, nameColumnToPlot="percentage")
+
+```
+
+### MarketSegment
+It is a categorical variable describing how the booking is made.
+
+```{r}
+sum(is.na(hotel_data$MarketSegment))
+# This is also a categorical variable, so, it is to be converted to factor type
+hotel_data$MarketSegment <- as.factor(hotel_data$MarketSegment)
+table(hotel_data$MarketSegment)
+MarketSegment_plot <- ggplot(hotel_data, aes(MarketSegment, fill = IsCanceled)) + geom_bar()
+MarketSegment_plot
+```
+Though the plot seems to be skewed towards the Online TA, the count of each category is a considerable number and the distribution of the target variable's output is not skewed for any category
+
+### IsRepeatedGuest
+This is a categorical variable, indicating if the booking is from a repeated guest. value 1 if repeated guest.
+
+```{r}
+sum(is.na(hotel_data$IsRepeatedGuest))
+#converting the variable to factor type
+hotel_data$IsRepeatedGuest <- as.factor(hotel_data$IsRepeatedGuest)
+table(hotel_data$IsRepeatedGuest)
+IsRepeatedGuest_plot <- ggplot(hotel_data, aes(IsRepeatedGuest, fill = IsCanceled)) + geom_bar()
+IsRepeatedGuest_plot
+```
+We can see that the cancellation rate is less for repeated guests as expected but we cannot conclude anything as the repeated guests number is less in the dataset
+
+### PreviousCancellations
+It is a numeric variable reporting the number of times the user cancelled his booking previously
+
+```{r}
+sum(is.na(hotel_data$PreviousCancellations))
+table(hotel_data$PreviousCancellations)
+```
+
+As the dataset has many users who have not done any previous cancellation, we can compare the cancellation rate
+of 0 previous cancellations with the rest
+
+```{r}
+Previouscan_subset <- within(hotel_data, {
+  PreviousCancellations.cat <- NA
+  PreviousCancellations.cat[hotel_data$PreviousCancellations == 0] <- "No"
+  PreviousCancellations.cat[hotel_data$PreviousCancellations > 0 ] <- "Yes"
+})
+PreviousCan <- ggplot(Previouscan_subset, aes(PreviousCancellations.cat, fill = IsCanceled)) + geom_bar()
+PreviousCan
+
+remove(Previouscan_subset) #clearing the subset from the environment
+```
+We can clearly see that cancellation rate is more if atleast one cancellation was made by the user prior to the current booking
+
+### PreviousBookingsNotCanceled
+Similar to the PreviousCancellations variable, this variable is an integer giving the number of bookings made by the user without cancelling prior to the current booking
+
+```{r}
+sum(is.na(hotel_data$PreviousBookingsNotCanceled))
+BookingsNotCanceled_plot <- ggplot(hotel_data, aes(x = PreviousBookingsNotCanceled, y = IsCanceled)) + geom_boxplot(fill = 'purple')
+BookingsNotCanceled_plot
+```
+From the boxplot we can see that many users did not do any booking previously without cancelling
+
+### ReservedRoomType
+This is a categorical variable giving the type of room booked by the user.
+
+```{r}
+sum(is.na(hotel_data$ReservedRoomType))
+hotel_data$ReservedRoomType <- as.factor(hotel_data$ReservedRoomType)
+table(hotel_data$ReservedRoomType)
+ReservedRoomType_plot <- ggplot(hotel_data, aes(ReservedRoomType, fill=IsCanceled)) + geom_bar()
+ReservedRoomType_plot
+```
+We can see that cancellations are distributed well for all the room types
+
+### AssignedRoomType
+Similar to previous variable, this variable is the type of room assigned to the user. It is also a categorical variable
+
+```{r}
+sum(is.na(hotel_data$AssignedRoomType))
+hotel_data$AssignedRoomType <- as.factor(hotel_data$AssignedRoomType)
+table(hotel_data$AssignedRoomType)
+AssignedRoomType_plot <- ggplot(hotel_data, aes(AssignedRoomType, fill=IsCanceled)) + geom_bar()
+AssignedRoomType_plot
+```
+As we have two variables for the room type, one in the booking and the other assigned, we can check the cancellation rate by users having different booking and assigned room types
+
+```{r}
+roomtype_sub <- within(hotel_data, {
+  room_type <- NA
+  room_type[as.character(hotel_data$ReservedRoomType) == as.character(hotel_data$AssignedRoomType)] <- "Same"
+})
+roomtype_sub$room_type[is.na(roomtype_sub$room_type)] <- "Different"
+roomtype_sub$room_type <- as.factor(roomtype_sub$room_type)
+table(roomtype_sub$room_type)
+RoomType_plot <- ggplot(roomtype_sub, aes(room_type, fill=IsCanceled)) + geom_bar()
+RoomType_plot
+
+remove(roomtype_sub) #clearing the sub data from the environment
+```
+
+We can see that if the assigned room type is different to booked room type, the percentage of cancellations is less. This might be because, in general, when the assigned room type is different it is an upgrade. So, if there is an upgrade in the room type then the user is less likely to cancel
+
+### BookingChanges
+This is an integer variable, giving the number of changes made by the user.
+
+```{r}
+sum(is.na(hotel_data$BookingChanges))
+table(hotel_data$BookingChanges)
+BookingChanges_plot <- ggplot(hotel_data, aes(factor(BookingChanges), fill=IsCanceled)) + geom_bar()
+BookingChanges_plot
+```
+From the plot we can see, the number of changes does not have much impact on the cancellation
+
+### DepositType
+It is a categorical variable giving the type of deposit done by the user
+
+```{r}
+sum(is.na(hotel_data$DepositType))
+hotel_data$DepositType <- as.factor(hotel_data$DepositType)
+table(hotel_data$DepositType)
+
+DepositType_plot <- ggplot(hotel_data, aes(DepositType, fill=IsCanceled)) + geom_bar()
+DepositType_plot
+```
+Surprisingly, the cancellation percentage is more with the non refund deposit type
+
+### CustomerType
+It is categorical variable describing through what the customer done the booking
+
+```{r}
+sum(is.na(hotel_data$CustomerType))
+hotel_data$CustomerType <- as.factor(hotel_data$CustomerType)
+
+CustomerType_plot <- ggplot(hotel_data, aes(CustomerType, fill = IsCanceled)) + geom_bar()
+CustomerType_plot
+
+```
+The cancellation percentage is less when the customer is associated to some contract or group. 
+
+### RequiredCarParkingSpaces
+This is a numeric variable, giving the number of car parking spaces required by the customer
+
+```{r}
+unique(hotel_data$RequiredCarParkingSpaces)
+hotel_1 <- hotel_data 
+hotel_1$RequiredCarParkingSpaces <- as.factor(hotel_1$RequiredCarParkingSpaces)
+carparking_plot <- ggplot(hotel_1, aes(RequiredCarParkingSpaces, fill=IsCanceled)) + geom_bar()
+carparking_plot
+
+remove(hotel_1)
+```
+There are no cancellations when the requested car parking spaces are not 0. This is not theoretically justifiable and this is just the requested number of car parking spaces, so, we can get some insight only if there is more data on this.
+
+### TotalOfSpecialRequests
+It is an integer variable, giving the number of	special	requests	made	by	the	customer	(e.g. twin	bed	or	high	floor)
+
+```{r}
+sum(is.na(hotel_data$TotalOfSpecialRequests))
+table(hotel_data$TotalOfSpecialRequests)
+
+SpecialRequests_plot <- ggplot(hotel_data, aes(x = IsCanceled, y = TotalOfSpecialRequests)) + geom_boxplot(fill=rgb(1,0.8,0.8,0.7))
+SpecialRequests_plot
+
+```
+We can see that many users did not make any special requests and the distribution of target variable is not skewed based on the number of special requests
+
+### Cleaning the environment and preparing it for data modelling
+As we have performed many operations in data exploration phase, based on our insights, we have to update the dataset accordingly.
+
+```{r}
+#remove(StaysInWeekendNights_plot, StaysInWeekNights_plot, SpecialRequests_plot, RoomType_plot, ReservedRoomType_plot, PreviousCan, Plot7, Meals_plot, MarketSegment_plot, LeadTime_plot, IsRepeatedGuest_plot, IsCanceled_plot, DepositType_plot, CustomerType_plot, Children_plot, carparking_plot, BookingsNotCanceled_plot, BookingChanges_plot, Babies_plot, AssignedRoomType_plot, Adults_plot, hotel_1, Previouscan_subset, roomtype_sub)
+
+updated_hotel_data <- within(hotel_data, {
+  PreviousCancellations.cat <- NA
+  PreviousCancellations.cat[hotel_data$PreviousCancellations == 0] <- "No"
+  PreviousCancellations.cat[hotel_data$PreviousCancellations > 0 ] <- "Yes"
+})
+updated_hotel_data$PreviousCancellations.cat <- as.factor(updated_hotel_data$PreviousCancellations.cat)
+
+
+updated_hotel_data <- within(updated_hotel_data, {
+  RoomTypeChanged <- NA
+  RoomTypeChanged[as.character(hotel_data$ReservedRoomType) == as.character(hotel_data$AssignedRoomType)] <- "No"
+})
+updated_hotel_data$RoomTypeChanged[is.na(updated_hotel_data$RoomTypeChanged)] <- "Yes"
+updated_hotel_data$RoomTypeChanged <- as.factor(updated_hotel_data$RoomTypeChanged)
+
+
+drop <- c('PreviousCancellations', 'AssignedRoomType')
+updated_hotel_data <- updated_hotel_data[, !(names(updated_hotel_data) %in% drop)]
+
+glimpse(updated_hotel_data)
+
+```
+
+
+## Data Modelling
+In the data modelling part we initally divided the dataset into train and test datasets, then built 2 models: SVM and tree models. Association Rule Mining is also done at the end
+
+### Train-Test Splitting
+The training and testing datasets are split on the main dataset with a standard value of 70% keeping the split in target variable aswell
+
+```{r}
+set.seed(111)
+trainList <- createDataPartition(y=updated_hotel_data$IsCanceled, p=.65, list=FALSE)
+
+trainSet <- updated_hotel_data[trainList,]
+testSet <- updated_hotel_data[-trainList,]
+
+```
+
+### SVM Classifier
+
+```{r}
+SvmModel <- ksvm(IsCanceled ~ ., data = trainSet, C = 5, cross = 3, prob.model	=	TRUE) # the model will perform 3 cross-validations with cost at 5
+summary(SvmModel)
+
+svm_pred <- predict(SvmModel, testSet, type ="response")
+table(svm_pred,testSet$IsCanceled)
+svm_ConfMatrix <- confusionMatrix(svm_pred, testSet$IsCanceled)
+svm_ConfMatrix
+fourfoldplot(table(svm_pred, testSet$IsCanceled))
+
+```
+
+### Tree Model
+
+```{r}
+rpartModel <- rpart(IsCanceled ~ ., data = trainSet, method = "class")
+rpartModel
+rpart.plot(rpartModel)
+
+
+rpartOut <- predict(rpartModel, newdata = testSet, type="class")
+confusionMatrix(rpartOut,testSet$IsCanceled)
+```
+
+### Association Rule Mining
+
+```{r}
+factored_hotel_data <- hotel_data
+
+col_names <- names(factored_hotel_data)
+factored_hotel_data[,col_names] <- lapply(factored_hotel_data[,col_names] , factor)
+
+set.seed(111)
+factored_hotel_data <- as(factored_hotel_data, "transactions")
+
+remove(itemFreq)
+itemFreq <- itemFrequency(factored_hotel_data)
+str(itemFreq)
+#sortedData <- sort[(itemFreq)]
+itemFreqPlot <- itemFrequencyPlot(factored_hotel_data, topN=20)
+ 
+rules <- apriori(factored_hotel_data, parameter=list(supp=0.042, conf=0.85), control=list(verbose=F), appearance=list(default="lhs",rhs=("IsCanceled=1")))
+inspect(rules)
+plot(rules,method="paracoord")
+
+```
+
